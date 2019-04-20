@@ -449,13 +449,13 @@ class NBTSerializable:
 def test():
     nbt = NBTFile(value={
         'test_long': NBTTagLong(104005),
-        'test_compaund': NBTTagCompound({
-            'float': NBTTagFloat(1.0)
-        }),
+        # 'test_compaund': NBTTagCompound({
+        #     'float': NBTTagFloat(1.0)
+        # }),
         'test_list': NBTTagList(NBTTagString, [
             NBTTagString('Timmy')
         ]),
-        'test_short_array': NBTTagUShortArray([0xffff, 2]),
+        # 'test_short_array': NBTTagUShortArray([0xffff, 2]),
         'empty_compaund': NBTTagCompound(),
         'empty_list': NBTTagList(NBTTagString)
     })
@@ -466,3 +466,7 @@ def test():
     with open('out.nbt', 'rb') as io:
         nbt = NBTFile(io)
         print(nbt.pretty())
+
+    import gzip
+    with gzip.open('out.nbt.gz', 'wb') as io:
+        nbt.save(io)
