@@ -486,11 +486,6 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                 material.textures.append(texture)
             materials.append(material)
 
-        # If all materials where None (unassigned material slots) then we actually didn't export materials and
-        # we need to raise an exception
-        if len(materials) <= 0:
-            raise RuntimeError("Can't have a model without materials, use at least one material in your mesh objects.")
-
         return materials
 
     @profile('generateNodes', 0)
