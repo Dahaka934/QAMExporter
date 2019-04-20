@@ -14,7 +14,7 @@ from .nbt import (
 
 __all__ = (
     'QamModel', 'VertexAttributes', 'VertexAttribute',
-    'Vertex', 'Mesh', 'MeshPart', 'Node', 'NodePart', 'Bone', 'Texture',
+    'Vertex', 'Mesh', 'MeshPart', 'Node', 'NodePart', 'BoundBox', 'Bone', 'Texture',
     'Material', 'Animation', 'NodeAnimation', 'Keyframe', 'KeyframeSeparate'
 )
 
@@ -340,6 +340,7 @@ class Mesh(NBTSerializable):
         verts = [v for vert in self.vertices for attr in vert.attributes for v in attr.value]
 
         nbt = NBTTagCompound()
+        nbt['id'] = NBTTagString(self.id)
         nbt['attributes'] = NBTTagList(NBTTagString, [NBTTagString(it) for it in attr_names])
         nbt['vertices'] = NBTTagFloatArray(verts)
         nbt['parts'] = NBTTagList(NBTTagCompound, [it.packNBT() for it in self.parts])
@@ -352,25 +353,31 @@ class Mesh(NBTSerializable):
 # end Mesh
 
 class MeshPart(NBTSerializable):
-    __slots__ = ('id', 'type', 'indices', 'parentMesh')
+    __slots__ = ('id', 'type', 'indices', 'parentMesh', 'maxIndex')
 
     def __init__(self, id="", type="TRIANGLES", indices=None, parentMesh=None):
         self.id = id
         self.type = type
         self.indices = indices
         self.parentMesh = parentMesh
+        self.maxIndex = 0
 
     def addIndex(self, value):
         if self.indices is None:
             self.indices = []
         self.indices.append(value)
+        if value > self.maxIndex:
+            self.maxIndex = value
 
     def packNBT(self):
         nbt = NBTTagCompound()
         nbt['id'] = NBTTagString(self.id)
         nbt['type'] = NBTTagString(self.type)
         if self.indices is not None:
-            nbt['indices'] = NBTTagUShortArray(self.indices)
+            if self.maxIndex >= 1 << 16:
+                nbt['indices'] = NBTTagIntArray(self.indices)
+            else:
+                nbt['indices'] = NBTTagUShortArray(self.indices)
         return nbt
 
     def __repr__(self):
@@ -424,12 +431,13 @@ class Node(NBTSerializable):
 # end Node
 
 class NodePart(NBTSerializable):
-    __slots__ = ('meshPartId', 'materialId', 'bones')
+    __slots__ = ('meshPartId', 'materialId', 'bones', 'bound_box')
 
     def __init__(self):
         self.meshPartId = ""
         self.materialId = ""
         self.bones = None
+        self.bound_box = None
 
     def addBone(self, value):
         if self.bones is None:
@@ -442,9 +450,22 @@ class NodePart(NBTSerializable):
         nbt['materialId'] = NBTTagString(self.materialId)
         if self.bones is not None:
             nbt['bones'] = NBTTagList(NBTTagCompound, [it.packNBT() for it in self.bones])
+        if self.bound_box is not None:
+            nbt['boundBox'] = self.bound_box.packNBT()
         return nbt
 
 # end NodePart
+
+class BoundBox(NBTSerializable):
+    __slots__ = ('values')
+
+    def __init__(self, values):
+        self.values = values
+
+    def packNBT(self):
+        return NBTTagList(NBTTagFloatArray, [NBTTagFloatArray(it) for it in self.values])
+
+# end BoundBox
 
 class Bone(NBTSerializable):
     __slots__ = ('node', 'translation', 'rotation', 'scale')
@@ -479,7 +500,7 @@ class Texture(NBTSerializable):
     def packNBT(self):
         nbt = NBTTagCompound()
         nbt['id'] = NBTTagString(self.id)
-        nbt['filename'] = NBTTagString(self.filename)
+        nbt['fileName'] = NBTTagString(self.filename)
         nbt['type'] = NBTTagString(self.type)
         return nbt
 
@@ -532,14 +553,14 @@ class Animation(NBTSerializable):
 # end Animation
 
 class NodeAnimation(NBTSerializable):
-    __slots__ = ('boneId', 'keyframes', 'translation', 'rotation', 'scale')
+    __slots__ = ('boneId', 'keyframes', 'translation', 'rotation', 'scaling')
 
     def __init__(self):
         self.boneId = ""
         self.keyframes = None
         self.translation = None
         self.rotation = None
-        self.scale = None
+        self.scaling = None
 
     def addKeyframe(self, value):
         if self.keyframes is None:
@@ -556,34 +577,34 @@ class NodeAnimation(NBTSerializable):
             self.rotation = []
         self.rotation.append(value)
 
-    def addScale(self, value):
-        if self.scale is None:
-            self.scale = []
-        self.scale.append(value)
+    def addScaling(self, value):
+        if self.scaling is None:
+            self.scaling = []
+        self.scaling.append(value)
 
     def packNBT(self):
         nbt = NBTTagCompound()
         nbt['boneId'] = NBTTagString(self.boneId)
         if self.keyframes is not None:
-            nbt['keyframes'] = NBTTagList(NBTTagFloatArray, [it.packNBT() for it in self.keyframes])
+            nbt['keyFrames'] = NBTTagList(NBTTagFloatArray, [it.packNBT() for it in self.keyframes])
         if self.translation is not None:
             nbt['translation'] = NBTTagList(NBTTagFloatArray, [it.packNBT() for it in self.translation])
         if self.rotation is not None:
             nbt['rotation'] = NBTTagList(NBTTagFloatArray, [it.packNBT() for it in self.rotation])
-        if self.scale is not None:
-            nbt['scale'] = NBTTagList(NBTTagFloatArray, [it.packNBT() for it in self.scale])
+        if self.scaling is not None:
+            nbt['scaling'] = NBTTagList(NBTTagFloatArray, [it.packNBT() for it in self.scaling])
         return nbt
 
 # end NodeAnimation
 
 class Keyframe(NBTSerializable):
-    __slots__ = ('keytime', 'translation', 'rotation', 'scale')
+    __slots__ = ('keytime', 'translation', 'rotation', 'scaling')
 
     def __init__(self):
         self.keytime = 0.0
         self.translation = None
         self.rotation = None
-        self.scale = None
+        self.scaling = None
 
     def createSeparateTranslation(self):
         return KeyframeSeparate(self.keytime, self.translation)
@@ -591,14 +612,14 @@ class Keyframe(NBTSerializable):
     def createSeparateRotation(self):
         return KeyframeSeparate(self.keytime, self.rotation)
 
-    def createSeparateScale(self):
+    def createSeparateScaling(self):
         return KeyframeSeparate(self.keytime, self.scale)
 
     def packNBT(self):
         list = [self.keytime]
         list.extend(self.translation if self.translation is not None else [0.0, 0.0, 0.0])
         list.extend(self.rotation if self.rotation is not None else [1.0, 0.0, 0.0, 0.0])
-        list.extend(self.scale if self.scale is not None else [1.0, 1.0, 1.0])
+        list.extend(self.scaling if self.scaling is not None else [1.0, 1.0, 1.0])
         return NBTTagFloatArray(list)
 
 # end Keyframe
