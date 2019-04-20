@@ -578,6 +578,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                     nodePart.meshPartId = blMesh.name + "_part" + str(blMaterialIndex)
                     nodePart.materialId = blMaterial.name
 
+                    if blNode.bound_box is not None:
+                        nodePart.bound_box = BoundBox(blNode.bound_box)
+
                     # Start writing bones
                     if self.include_bones and len(blNode.vertex_groups) > 0:
                         for blVertexGroup in blNode.vertex_groups:
