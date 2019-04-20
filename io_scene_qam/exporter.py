@@ -200,9 +200,6 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         # Defines our mapping from Blender Z-Up to whatever the user selected
         self.setupAxisConversion(self.axis_forward, self.axis_up)
 
-        # Changes Blender to "object" mode
-        bpy.ops.object.mode_set(mode='OBJECT')
-
         wm.progress_update(1)
         self.model = QamModel()
         self.bpyObjects = self.filterBlenderObjects(context)
