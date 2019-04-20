@@ -251,7 +251,8 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         from .nbt import NBTFile
         nbt = NBTFile(value=self.model.packNBT())
 
-        with open(self.filepath, 'wb') as io:
+        import gzip
+        with gzip.open(self.filepath, 'wb') as io:
             nbt.save(io)
 
         if self.text_output:
