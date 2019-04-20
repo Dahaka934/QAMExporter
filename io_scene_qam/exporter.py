@@ -244,12 +244,6 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
     def cleanData(self):
         self.model = None
         self.bpyObjects = None
-
-        if 'nodes' in self.cache:
-            cacheNodes = self.cache['nodes']
-            for it in cacheNodes.values():
-                bpy.data.objects.remove(it[0])
-                bpy.data.meshes.remove(it[1])
         self.cache.clear()
 
     @profile('writeToFile', 0)
@@ -297,7 +291,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             mesh.id = blNode.data.name
 
             # Clone mesh to a temporary object. Wel'll apply modifiers and triangulate the clone before exporting.
-            blNode, blMesh = self.cacheNodeMeshTriangulate(context, blNode)
+            blNode = self.copyNode(context, blNode)
+            blMesh = blNode.data
+            self.meshTriangulate(blMesh)
 
             # We can only export polygons that are associated with a material, so we loop
             # through the list of materials for this mesh
@@ -411,6 +407,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
             if isTangentsGenerated:
                 blMesh.free_tangents()
+
+            bpy.data.objects.remove(blNode)
+            bpy.data.meshes.remove(blMesh)
 
             mesh.normalizeAttributes()
             meshes.append(mesh)
@@ -574,11 +573,6 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                     utils.warn("Ignored mesh %r, no materials found" % blMesh)
                     continue
 
-                # We apply the mesh modifiers to a cloned mesh. Modifiers that duplicate
-                # vertices (like Mirror modifier) need this so when we scan vertex groups these
-                # vertices are considered real and we know which vertex groups they are weighted to
-                modNode, modMesh = self.cacheNodeMeshTriangulate(context, blNode)
-
                 for blMaterialIndex in range(0, len(blMesh.materials)):
                     blMaterial = blMesh.materials[blMaterialIndex]
                     if blMaterial is None:
@@ -736,19 +730,11 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         # Finally return the generated animations
         return animations
 
-    @profile('cacheNodeMeshTriangulate', 1)
-    def cacheNodeMeshTriangulate(self, context, blNode):
-        cacheNodes = self.cache.setdefault('nodes', {})
-        if blNode not in cacheNodes:
-            node = blNode.copy()
-            mesh = node.to_mesh(context.depsgraph, self.use_mesh_modifiers)
-            self.meshTriangulate(mesh)
-            node.data = mesh
-            cacheNode = (node, mesh)
-            cacheNodes[blNode] = cacheNode
-            return cacheNode
-        else:
-            return cacheNodes[blNode]
+    @profile('copyNode', 1)
+    def copyNode(self, context, blNode):
+        node = blNode.copy()
+        node.data = node.to_mesh(context.depsgraph, self.use_mesh_modifiers)
+        return node
 
     @profile('meshTriangulate', 1)
     def meshTriangulate(self, me):
