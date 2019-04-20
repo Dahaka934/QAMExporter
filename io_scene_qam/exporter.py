@@ -70,7 +70,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
     use_mesh_modifiers: BoolProperty(
             name="Apply Modifiers",
             description="Apply Modifiers",
-            default=True
+            default=False
             )
 
     include_uvs: BoolProperty(
