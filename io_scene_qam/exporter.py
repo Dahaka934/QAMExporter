@@ -683,8 +683,8 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                                 bone.addTranslation(keyframe.createSeparateTranslation())
                             if keyframe.rotation is not None:
                                 bone.addRotation(keyframe.createSeparateRotation())
-                            if keyframe.scale is not None:
-                                bone.addScale(keyframe.createSeparateScale())
+                            if keyframe.scaling is not None:
+                                bone.addScaling(keyframe.createSeparateScaling())
 
                     if bone.translation is not None and len(bone.translation) > 0:
                         bone.translation = self.approximateKeyframes(bone.translation, 0, self.approx_err_translations)
@@ -696,10 +696,10 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                         for rotation in bone.rotation:
                             rotation.value = self.convertQuaternionCoordinate(rotation.value)
 
-                    if bone.scale is not None and len(bone.scale) > 0:
-                        bone.scale = self.approximateKeyframes(bone.scale, 2, self.approx_err_scales)
-                        for scale in bone.scale:
-                            scale.value = self.convertScaleCoordinate(scale.value)
+                    if bone.scaling is not None and len(bone.scaling) > 0:
+                        bone.scaling = self.approximateKeyframes(bone.scaling, 2, self.approx_err_scales)
+                        for scaling in bone.scaling:
+                            scaling.value = self.convertScaleCoordinate(scaling.value)
 
                     # If there is at least one frameNumber for this bone, add it's data
                     if bone.keyframes is not None and len(bone.keyframes) > 0:
