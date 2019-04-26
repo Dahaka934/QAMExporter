@@ -14,7 +14,8 @@ from bpy.props import (
 from bpy_extras.io_utils import (
         ExportHelper,
         orientation_helper,
-        path_reference
+        path_reference,
+        axis_conversion
         )
 from bpy_extras.node_shader_utils import PrincipledBSDFWrapper
 
@@ -43,6 +44,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
     ui_tab: EnumProperty(
             items=(('MAIN', "Main", "Main basic settings"),
+                   ('ARMATURE', "Armature", "Armature-related settings"),
                    ('ANIMATION', "Animation", "Animation-related settings"),
                    ),
             name="ui_tab",
@@ -103,61 +105,73 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             default=True
             )
 
-    include_animation: EnumProperty(
+    include_animations: BoolProperty(
             name="Include animations",
-            items=(('NONE', "None", ""),
-                   ('DEFAULT', "Default keyframes", ""),
-                   ('SEPARATE', "Separate keyframes", ""),
-                   ('DEBUG', "Debug", ""),
-                   ),
-            default='SEPARATE',
+            description="Export animations",
+            default=True
             )
 
-    weights_per_vert_mod: IntProperty(
-            name="Mod weights per vert",
-            description="Mod count of bone weights per vertex",
+    bones_per_vert_mod: IntProperty(
+            name="Mod bones per vert",
+            description="Mod count of bones per vertex",
             default=4,
             soft_min=0, soft_max=100
             )
 
-    weights_per_vert_max: IntProperty(
-            name="Max weights per vert",
-            description="Maximum count of bone weights per vertex",
+    bones_per_vert_max: IntProperty(
+            name="Max bones per vert",
+            description="Maximum count of bones per vertex",
             default=8,
             soft_min=0, soft_max=100
+            )
+
+    bones_per_mesh_max: IntProperty(
+            name="Max bones per mesh",
+            description="Maximum count of bones per mesh part",
+            default=15,
+            soft_min=8, soft_max=100
+            )
+
+    approx_animations: BoolProperty(
+            name="Approx animations",
+            description="Approximate animations",
+            default=True
+            )
+
+    debug_animations: BoolProperty(
+            name="Debug animations",
+            description="Debug animations",
+            default=False
             )
 
     approx_err_translations: FloatProperty(
             name="Approx translations",
             description="Approximate translations error",
-            default=0.0005,
-            soft_min=0, soft_max=10
+            default=0.0001,
+            soft_min=0, soft_max=1
             )
 
     approx_err_rotations: FloatProperty(
             name="Approx rotations",
             description="Approximate rotations error",
-            default=0.0005,
-            soft_min=0, soft_max=10
+            default=0.0001,
+            soft_min=0, soft_max=1
             )
 
     approx_err_scales: FloatProperty(
             name="Approx scales",
             description="Approximate scales error",
-            default=0.0005,
-            soft_min=0, soft_max=10
+            default=0.0001,
+            soft_min=0, soft_max=1
             )
 
-    # This is our model
-    model = None
-    bpyObjects = None
-    cache = {}
-    default_keyframes = False
-    separate_keyframes = False
-
-    vector3AxisMapper = [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
-
-    vector4AxisMapper = [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+    def __init__(self):
+        self.model = None
+        self.bpyObjects = None
+        self.cache = ExportQAM.Cache()
+        self.vector3AxisMapper = [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+        self.vector4AxisMapper = [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+        self.global_matrix = None
 
     def draw(self, context):
         layout = self.layout
@@ -170,21 +184,27 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             layout.prop(self, "include_uvs")
             layout.prop(self, "include_normals")
             layout.prop(self, "include_tangent_binormal")
-        if self.ui_tab == 'ANIMATION':
+        elif self.ui_tab == 'ARMATURE':
             layout.prop(self, "include_bones")
             layout.prop(self, "include_armature")
-            layout.prop(self, "include_animation")
-            layout.prop(self, "weights_per_vert_mod")
-            layout.prop(self, "weights_per_vert_max")
+            layout.prop(self, "bones_per_vert_mod")
+            layout.prop(self, "bones_per_vert_max")
+            layout.prop(self, "bones_per_mesh_max")
+        elif self.ui_tab == 'ANIMATION':
+            layout.prop(self, "include_animations")
+            layout.prop(self, "approx_animations")
             layout.prop(self, "approx_err_translations")
             layout.prop(self, "approx_err_rotations")
             layout.prop(self, "approx_err_scales")
+            layout.prop(self, "debug_animations")
 
     def execute(self, context):
         try:
             self.cleanData()
+            bpy.ops.ed.undo_push("INVOKE_DEFAULT")
             return self.exportModel(context)
         finally:
+            bpy.ops.ed.undo()
             self.cleanData()
         return {'FINISHED'}
 
@@ -199,6 +219,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
         # Defines our mapping from Blender Z-Up to whatever the user selected
         self.setupAxisConversion(self.axis_forward, self.axis_up)
+        self.global_matrix = (axis_conversion(to_forward=self.axis_forward,
+                                              to_up=self.axis_up,
+                                              ).to_4x4())
 
         wm.progress_update(1)
         self.model = QamModel()
@@ -259,7 +282,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             with open(self.filepath + '.txt', 'w') as io:
                 io.write(nbt.pretty())
 
-        if self.include_animation == 'DEBUG':
+        if self.include_animations == 'DEBUG':
             writeToFileDebugKeyframes(self.filepath, self.model)
 
     def filterBlenderObjects(self, context):
@@ -289,7 +312,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             utils.info("[{:>2}/{:>2}]: {:s}", idx, len(blNodes), blNode.name)
 
             mesh = Mesh()
-            mesh.id = blNode.data.name
+            mesh.id = blNode.name
 
             # Clone mesh to a temporary object. Wel'll apply modifiers and triangulate the clone before exporting.
             blNode = self.copyNode(context, blNode)
@@ -303,116 +326,124 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                 utils.warn("Ignored mesh %r, no materials found" % blMesh)
                 continue
 
-            isTangentsGenerated = False
+            gen_tangents = False
             if self.include_tangent_binormal and blMesh.uv_layers is not None and len(blMesh.uv_layers) > 0:
                 try:
                     blMesh.calc_tangents(uvmap=blMesh.uv_layers[0].name)
-                    isTangentsGenerated = True
+                    gen_tangents = True
                 except:
                     pass
 
-            for blMaterialIndex in range(0, len(blMesh.materials)):
-                utils.debug("Processing mesh part for material '{!s}'", blMesh.materials[blMaterialIndex].name)
+            colorMap = blMesh.vertex_colors.active
 
-                # Fills the part here
-                meshPart = MeshPart(id=mesh.id + "_part" + str(blMaterialIndex))
+            wrVertices = self.wrapVertices(blMesh, self.include_bones)
 
-                for poly in blMesh.polygons:
-                    if (poly.material_index != blMaterialIndex):
-                        continue
+            need_normals = self.include_normals
+            need_tangents = gen_tangents
+            need_colors = colorMap is not None
+            need_uvs = self.include_uvs and blMesh.uv_layers is not None and len(blMesh.uv_layers) > 0
 
-                    for loopIndex in poly.loop_indices:
-                        blLoop = blMesh.loops[loopIndex]
-                        blVertex = blMesh.vertices[blLoop.vertex_index]
-                        vertex = Vertex()
+            meshPartIndex = 0
+            for blMaterialIndex in range(len(blMesh.materials)):
+                utils.info("  [{:>2}/{:>2}]: {:s}", blMaterialIndex, len(blMesh.materials), blMesh.materials[blMaterialIndex].name)
 
-                        ############
-                        # Vertex position is the minimal attribute
-                        attribute = VertexAttribute(VertexAttributes.POSITION, self.convertVectorCoordinate(blVertex.co))
-                        vertex.add(attribute)
-                        ############
+                wrGroups, polyGroups = self.splitVertices(blMesh, blMaterialIndex, wrVertices, self.bones_per_mesh_max)
+                self.cache.groups(mesh.id, blMaterialIndex, wrGroups)
 
-                        ############
-                        # Exporting tangent and binormals. We calculate those prior to normals because
-                        # if we want tangent and binormals then we'll be also using split normals, which
-                        # will be exported next section
-                        if self.include_tangent_binormal and isTangentsGenerated:
-                            normal = [None, None, None]
-                            normal[0], normal[1], normal[2] = blLoop.normal
-                            attribute = VertexAttribute(VertexAttributes.NORMAL, self.convertVectorCoordinate(normal))
+                for wrGroupIndex in range(len(wrGroups)):
+                    wrGroup = wrGroups[wrGroupIndex]
+                    wrGroup.remap()
+
+                    meshPart = MeshPart(id=mesh.id + "_" + str(meshPartIndex))
+                    meshPartIndex += 1
+
+                    for poly_i, poly in enumerate(blMesh.polygons):
+                        if poly.material_index != blMaterialIndex or polyGroups[poly_i] != wrGroupIndex:
+                            continue
+
+                        for loopIndex in poly.loop_indices:
+                            blLoop = blMesh.loops[loopIndex]
+                            blVertex = blMesh.vertices[blLoop.vertex_index]
+                            wrVertex = wrVertices[blLoop.vertex_index]
+                            vertex = Vertex()
+
+                            ############
+                            # Vertex position is the minimal attribute
+                            attribute = VertexAttributes.POSITION.of(wrVertex.pos, blLoop.vertex_index)
                             vertex.add(attribute)
+                            ############
 
-                            tangent = [None, None, None]
-                            tangent[0], tangent[1], tangent[2] = blLoop.tangent
-                            attribute = VertexAttribute(VertexAttributes.TANGENT, self.convertVectorCoordinate(tangent))
-                            vertex.add(attribute)
+                            ############
+                            # Exporting tangent and binormals. We calculate those prior to normals because
+                            # if we want tangent and binormals then we'll be also using split normals, which
+                            # will be exported next section
+                            if need_tangents:
+                                normal = [None, None, None]
+                                normal[0], normal[1], normal[2] = blLoop.normal
+                                vertex.add(VertexAttributes.NORMAL.of(normal))
 
-                            binormal = [None, None, None]
-                            binormal[0], binormal[1], binormal[2] = blLoop.bitangent
-                            attribute = VertexAttribute(VertexAttributes.BINORMAL, self.convertVectorCoordinate(binormal))
-                            vertex.add(attribute)
-                        ############
+                                tangent = [None, None, None]
+                                tangent[0], tangent[1], tangent[2] = blLoop.tangent
+                                vertex.add(VertexAttributes.TANGENT.of(tangent, 0))
 
-                        ############
-                        # Read normals. We also determine if we'll user per-face (flat shading)
-                        # or per-vertex normals (gouraud shading) here.
-                        elif self.include_normals:
-                            if poly.use_smooth:
-                                normals = self.convertVectorCoordinate(blVertex.normal)
-                            else:
-                                normals = self.convertVectorCoordinate(poly.normal)
+                                binormal = [None, None, None]
+                                binormal[0], binormal[1], binormal[2] = blLoop.bitangent
+                                vertex.add(VertexAttributes.BINORMAL.of(binormal, 0))
+                            ############
 
-                            attribute = VertexAttribute(VertexAttributes.NORMAL, normals)
-                            vertex.add(attribute)
-                        ############
+                            ############
+                            # Read normals. We also determine if we'll user per-face (flat shading)
+                            # or per-vertex normals (gouraud shading) here.
+                            elif need_normals:
+                                normal = [None, None, None]
+                                if poly.use_smooth:
+                                    normal[0], normal[1], normal[2] = blVertex.normal
+                                else:
+                                    normal[0], normal[1], normal[2] = poly.normal
+                                vertex.add(VertexAttributes.NORMAL.of(normal))
+                            ############
 
-                        ############
-                        # Defining vertex color
-                        colorMap = blMesh.vertex_colors.active
-                        if colorMap is not None:
-                            color = [None, None, None, 1.0]
-                            color[0], color[1], color[2] = colorMap.data[loopIndex].color
+                            ############
+                            # Defining vertex color
+                            if need_colors:
+                                color = [None, None, None, 1.0]
+                                color[0], color[1], color[2] = colorMap.data[loopIndex].color
 
-                            attribute = VertexAttribute(VertexAttributes.COLOR, color)
-                            vertex.add(attribute)
-                        ############
-
-                        ############
-                        # Exporting UV coordinates
-                        if self.include_uvs and blMesh.uv_layers is not None and len(blMesh.uv_layers) > 0:
-                            texCoordCount = 0
-                            for uv in blMesh.uv_layers:
-                                # We need to flip UV's because Blender use bottom-left as Y=0 and G3D use top-left
-                                flippedUV = [uv.data[loopIndex].uv[0], 1.0 - uv.data[loopIndex].uv[1]]
-
-                                attribute = VertexAttribute(VertexAttributes.TEXCOORD0 + texCoordCount, flippedUV)
+                                attribute = VertexAttributes.COLOR.of(color)
                                 vertex.add(attribute)
-                                texCoordCount = texCoordCount + 1
-                        ############
+                            ############
 
-                        ############
-                        # Exporting weights
-                        if self.include_bones and blVertex.groups is not None:
-                            for g in blVertex.groups:
-                                if not utils.is0(g.weight):
-                                    vertex.addBlendWeight(g.group, g.weight, self.weights_per_vert_max)
-                            # In the end we normalize the bone weights
-                            vertex.normalizeBlendWeight(self.weights_per_vert_mod)
-                        ############
+                            ############
+                            # Exporting UV coordinates
+                            if need_uvs:
+                                texCoordCount = 0
+                                for uv in blMesh.uv_layers:
+                                    # We need to flip UV's because Blender use bottom-left as Y=0 and G3D use top-left
+                                    flippedUV = [uv.data[loopIndex].uv[0], 1.0 - uv.data[loopIndex].uv[1]]
+                                    vertex.add(VertexAttributeObj(VertexAttributes.TEXCOORD0.id + texCoordCount, flippedUV))
+                                    texCoordCount += 1
+                            ############
 
-                        vertex.markDirty()
-                        meshPart.addIndex(mesh.addVertex(vertex))
+                            ############
+                            # Exporting weights
+                            if self.include_bones:
+                                for g in wrVertex.blendWeights:
+                                    vertex.addBlendWeight(wrGroup.map[g[0]], g[1])
+                            ############
 
-                mesh.addPart(meshPart)
+                            vertex.rehash()
+                            meshPart.addIndex(mesh.addVertex(vertex))
+                    mesh.addPart(meshPart)
+
                 utils.debug("\nFinished creating mesh part.\nMesh part data:\n###\n{!r}\n###", meshPart)
 
-            if isTangentsGenerated:
+            if gen_tangents:
                 blMesh.free_tangents()
 
             bpy.data.objects.remove(blNode)
             bpy.data.meshes.remove(blMesh)
 
-            mesh.normalizeAttributes()
+            mesh.normalizeAttributes(self.bones_per_vert_mod)
             meshes.append(mesh)
 
         return meshes
@@ -548,14 +579,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
                 translation, rotation, scale = transformMatrix.decompose()
 
-                if not utils.testDefaultQuaternion(rotation):
-                    node.rotation = self.convertQuaternionCoordinate(rotation)
-
-                if not utils.testDefaultTransform(translation):
-                    node.translation = self.convertVectorCoordinate(translation)
-
-                if not utils.testDefaultScale(scale):
-                    node.scale = self.convertScaleCoordinate(scale)
+                node.translation = self.convertTranslation(translation)
+                node.rotation = self.convertRotation(rotation)
+                node.scale = self.convertScale(scale)
 
             except:
                 utils.warn("Error decomposing transform for node %s" % blNode.name)
@@ -569,52 +595,47 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                     utils.warn("Ignored mesh %r, no materials found" % blMesh)
                     continue
 
+                meshPartIndex = 0
                 for blMaterialIndex in range(0, len(blMesh.materials)):
                     blMaterial = blMesh.materials[blMaterialIndex]
                     if blMaterial is None:
                         continue
 
-                    nodePart = NodePart()
-                    nodePart.meshPartId = blMesh.name + "_part" + str(blMaterialIndex)
-                    nodePart.materialId = blMaterial.name
+                    wrGroups = self.cache.groups(node.id, blMaterialIndex, None)
+                    for wrGroup in wrGroups:
+                        nodePart = NodePart()
+                        nodePart.meshPartId = blNode.name + "_" + str(meshPartIndex)
+                        nodePart.materialId = blMaterial.name
+                        meshPartIndex += 1
 
-                    if blNode.bound_box is not None:
-                        nodePart.bound_box = BoundBox(blNode.bound_box)
+                        if blNode.bound_box is not None:
+                            nodePart.bound_box = BoundBox(blNode.bound_box)
 
-                    # Start writing bones
-                    if self.include_bones and len(blNode.vertex_groups) > 0:
-                        for blVertexGroup in blNode.vertex_groups:
-                            # Try to find an armature with a bone associated with this vertex group
-                            blArmature = blNode.find_armature()
-                            if blArmature is not None:
+                        # Start writing bones
+                        blArmature = blNode.find_armature()
+                        if self.include_bones and len(blNode.vertex_groups) > 0 and blArmature is not None:
+                            for wrGroupIndex in wrGroup.set:
+                                blVertexGroup = blNode.vertex_groups[wrGroupIndex]
+                                bone = Bone()
+                                bone.node = ("%s_%s" % (blArmature.name, blVertexGroup.name))
+
                                 try:
                                     blBone = blArmature.data.bones[blVertexGroup.name]
-
-                                    bone = Bone()
-                                    bone.node = ("%s_%s" % (blArmature.name, blVertexGroup.name))
 
                                     boneTransformMatrix = blNode.matrix_local.inverted() @ blBone.matrix_local
                                     boneLocation, boneQuaternion, boneScale = boneTransformMatrix.decompose()
 
-                                    if not utils.testDefaultTransform(boneLocation):
-                                        bone.translation = self.convertVectorCoordinate(boneLocation)
-
-                                    if not utils.testDefaultQuaternion(boneQuaternion):
-                                        bone.rotation = self.convertQuaternionCoordinate(boneQuaternion)
-
-                                    if not utils.testDefaultScale(boneScale):
-                                        bone.scale = self.convertScaleCoordinate(boneScale)
-
-                                    nodePart.addBone(bone)
-
-                                except KeyError:
-                                    utils.warn("Vertex group %s has no corresponding bone" % (blVertexGroup.name))
-                                    pass
+                                    bone.translation = self.convertTranslation(boneLocation)
+                                    bone.rotation = self.convertRotation(boneQuaternion)
+                                    bone.scale = self.convertScale(boneScale)
                                 except:
                                     utils.error("Unexpected error exporting bone: %s" % blVertexGroup.name)
-                                    pass
+                                    bone.translation = [0.0, 0.0, 0.0]
+                                    bone.rotation = [0.0, 0.0, 0.0, 1.0]
+                                    bone.scale = [1.0, 1.0, 1.0]
 
-                    node.addPart(nodePart)
+                                nodePart.addBone(bone)
+                        node.addPart(nodePart)
 
             childNodes = self.generateNodes(context, blNode, parentName)
             if childNodes is not None and len(childNodes) > 0:
@@ -629,11 +650,8 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         # TODO Detect if certain curve uses linear interpolation. If yes then
         # we can safely just save keyframes as LibGDX also uses linear interpolation
         """If selected by the user, generates keyframed animations for the bones"""
-        if self.include_animation == 'NONE':
+        if not self.include_animations:
             return
-
-        self.default_keyframes = self.include_animation == 'DEFAULT' or self.include_animation == 'DEBUG'
-        self.separate_keyframes = self.include_animation == 'SEPARATE' or self.include_animation == 'DEBUG'
 
         animations = []
 
@@ -654,7 +672,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
             animation = Animation()
             animation.id = blAction.name
-            animation.time = frameRange * frameTime
+            animation.time = (frameRange - 1) * frameTime
 
             bonesIndex = 0
             for blArmature in self.bpyObjects:
@@ -679,44 +697,22 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                         keyframe.keytime = (frameNumber - frameStart) * frameTime
 
                         emptyAnimation = False
-                        if self.default_keyframes:
-                            bone.addKeyframe(keyframe)
-                        if self.separate_keyframes:
-                            if keyframe.translation is not None:
-                                bone.addTranslation(keyframe.createSeparateTranslation())
-                            if keyframe.rotation is not None:
-                                bone.addRotation(keyframe.createSeparateRotation())
-                            if keyframe.scaling is not None:
-                                bone.addScaling(keyframe.createSeparateScaling())
+                        if keyframe.translation is not None:
+                            bone.addTranslation(keyframe.createSeparateTranslation())
+                        if keyframe.rotation is not None:
+                            bone.addRotation(keyframe.createSeparateRotation())
+                        if keyframe.scaling is not None:
+                            bone.addScaling(keyframe.createSeparateScaling())
 
-                    if bone.translation is not None and len(bone.translation) > 0:
-                        bone.translation = self.approximateKeyframes(bone.translation, 0, self.approx_err_translations)
-                        for translation in bone.translation:
-                            translation.value = self.convertVectorCoordinate(translation.value)
+                    if self.approx_animations:
+                        if bone.translation is not None and len(bone.translation) > 0:
+                            bone.translation = self.approximateKeyframes(bone.translation, 0, self.approx_err_translations)
 
-                    if bone.rotation is not None and len(bone.rotation) > 0:
-                        bone.rotation = self.approximateKeyframes(bone.rotation, 1, self.approx_err_rotations)
-                        for rotation in bone.rotation:
-                            rotation.value = self.convertQuaternionCoordinate(rotation.value)
+                        if bone.rotation is not None and len(bone.rotation) > 0:
+                            bone.rotation = self.approximateKeyframes(bone.rotation, 1, self.approx_err_rotations)
 
-                    if bone.scaling is not None and len(bone.scaling) > 0:
-                        bone.scaling = self.approximateKeyframes(bone.scaling, 2, self.approx_err_scales)
-                        for scaling in bone.scaling:
-                            scaling.value = self.convertScaleCoordinate(scaling.value)
-
-                    # If there is at least one frameNumber for this bone, add it's data
-                    if bone.keyframes is not None and len(bone.keyframes) > 0:
-                        # We operated with Blender coordinates the entire time, now we convert
-                        # to the target coordinates
-                        for keyframe in bone.keyframes:
-                            if keyframe.translation is not None:
-                                keyframe.translation = self.convertVectorCoordinate(keyframe.translation)
-
-                            if keyframe.rotation is not None:
-                                keyframe.rotation = self.convertQuaternionCoordinate(keyframe.rotation)
-
-                            if keyframe.scale is not None:
-                                keyframe.scale = self.convertScaleCoordinate(keyframe.scale)
+                        if bone.scaling is not None and len(bone.scaling) > 0:
+                            bone.scaling = self.approximateKeyframes(bone.scaling, 2, self.approx_err_scales)
 
                     # Finally add bone node to animation
                     if not emptyAnimation or True:
@@ -751,23 +747,62 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         bm.free()
         del bmesh
 
-    @profile('convertVectorCoordinate', 2)
-    def convertVectorCoordinate(self, co):
+    @profile('wrapVertices', 1)
+    def wrapVertices(self, blMesh, bones):
+        vertices = [None] * len(blMesh.vertices)
+
+        for i, vert in enumerate(blMesh.vertices):
+            pos = vert.co
+            vertices[i] = ExportQAM.WrappedVertex(self.convertTranslation(pos))
+            if bones:
+                vertices[i].setGroups(vert.groups, self.bones_per_vert_max)
+
+        return vertices
+
+    @profile('splitVertices', 1)
+    def splitVertices(self, blMesh, blMaterialIndex, vertices, maxBones):
+        groups = []
+        polygonsGroup = [-1] * len(blMesh.polygons)
+
+        def addPolyToGroup(group, poly):
+            for loopIndex in poly.loop_indices:
+                blLoop = blMesh.loops[loopIndex]
+                if not group.addVert(vertices[blLoop.vertex_index]):
+                    return False
+            return True
+
+        def tryAddPoly(poly):
+            for group_i, group in enumerate(groups):
+                if addPolyToGroup(group, poly):
+                    return group_i
+            return -1
+
+        for poly_i, poly in enumerate(blMesh.polygons):
+            if (poly.material_index == blMaterialIndex):
+                idx = tryAddPoly(poly)
+                if idx < 0:
+                    new = ExportQAM.Group(maxBones)
+                    groups.append(new)
+                    addPolyToGroup(new, poly)
+                    idx = len(groups) - 1
+                polygonsGroup[poly_i] = idx
+
+        return groups, polygonsGroup
+
+    def convertTranslation(self, co):
         mapX = self.vector3AxisMapper[0]
         mapY = self.vector3AxisMapper[1]
         mapZ = self.vector3AxisMapper[2]
         return [co[mapX[0]] * mapX[1], co[mapY[0]] * mapY[1], co[mapZ[0]] * mapZ[1]]
 
-    @profile('convertQuaternionCoordinate', 2)
-    def convertQuaternionCoordinate(self, co):
+    def convertRotation(self, co):
         mapX = self.vector4AxisMapper[0]
         mapY = self.vector4AxisMapper[1]
         mapZ = self.vector4AxisMapper[2]
         mapW = self.vector4AxisMapper[3]
         return [co[mapX[0]] * mapX[1], co[mapY[0]] * mapY[1], co[mapZ[0]] * mapZ[1], co[mapW[0]] * mapW[1]]
 
-    @profile('convertScaleCoordinate', 2)
-    def convertScaleCoordinate(self, co):
+    def convertScale(self, co):
         return [co[self.vector3AxisMapper[0][0]], co[self.vector3AxisMapper[1][0]], co[self.vector3AxisMapper[2][0]]]
 
     @profile('getTransformFromBone', 2)
@@ -825,8 +860,103 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
         return matrix
 
-    def setupAxisConversion(self, axisForward, axisUp):
+    @profile('createKeyframe', 2)
+    def createKeyframe(self, translationFCurve, rotationFCurve, scaleFCurve, frameNumber, restTransform):
+        keyframe = Keyframe()
 
+        translationVector = [0.0, 0.0, 0.0, 0.0]
+        rotationVector = [1.0, 0.0, 0.0, 0.0]
+        scaleVector = [1.0, 1.0, 1.0]
+
+        if translationFCurve is not None:
+            if translationFCurve[0] is not None:
+                translationVector[0] = translationFCurve[0].evaluate(frameNumber)
+            if translationFCurve[1] is not None:
+                translationVector[1] = translationFCurve[1].evaluate(frameNumber)
+            if translationFCurve[2] is not None:
+                translationVector[2] = translationFCurve[2].evaluate(frameNumber)
+
+        if rotationFCurve is not None:
+            if rotationFCurve[0] is not None:
+                rotationVector[0] = rotationFCurve[0].evaluate(frameNumber)
+            if rotationFCurve[1] is not None:
+                rotationVector[1] = rotationFCurve[1].evaluate(frameNumber)
+            if rotationFCurve[2] is not None:
+                rotationVector[2] = rotationFCurve[2].evaluate(frameNumber)
+            if rotationFCurve[3] is not None:
+                rotationVector[3] = rotationFCurve[3].evaluate(frameNumber)
+
+        if scaleFCurve is not None:
+            if scaleFCurve[0] is not None:
+                scaleVector[0] = scaleFCurve[0].evaluate(frameNumber)
+            if scaleFCurve[1] is not None:
+                scaleVector[1] = scaleFCurve[1].evaluate(frameNumber)
+            if scaleFCurve[2] is not None:
+                scaleVector[2] = scaleFCurve[2].evaluate(frameNumber)
+
+        poseTransform = self.createTransformMatrix(translationVector, rotationVector, scaleVector)
+        translationVector, rotationVector, scaleVector = (restTransform @ poseTransform).decompose()
+
+        # If one of the transform attributes had to be evaluated above then this
+        # is a keyframe, otherwise it's on rest pose and we don't need the keyframe
+        keyframe.translation = self.convertTranslation(translationVector)
+        keyframe.rotation = self.convertRotation(rotationVector)
+        keyframe.scale = self.convertScale(scaleVector)
+        return keyframe
+
+    @profile('approximate', 1)
+    def approximateKeyframes(self, separateList, type, err):
+        if type == 1:
+            elementSize = 5
+        else:
+            elementSize = 4
+
+        points = array([array(p.value + [p.keytime]) for p in separateList])
+        approx = Approximator(elementSize)
+        indices = approx.approximate(points, err)
+        out = [separateList[i] for i in indices]
+
+        if len(out) == 2:
+            out0 = out[0].value
+            out1 = out[1].value
+            for i in range(1, elementSize - 1):
+                if utils.limitFloatPrecision(out0[i]) != utils.limitFloatPrecision(out1[i]):
+                    return out
+
+            if type == 0:
+                if utils.testDefaultTransform(out0):
+                    return []
+            elif type == 1:
+                if utils.testDefaultQuaternion(out0):
+                    return []
+            elif type == 2:
+                if utils.testDefaultScale(out0):
+                    return []
+
+            out.pop()
+        return out
+
+    class Cache:
+        def __init__(self):
+            self.groups_dict = {}
+            self.tasks = []
+
+        def groups(self, name, blMaterialIndex, groups):
+            key = name + '__' + str(blMaterialIndex)
+            if groups is None:
+                return self.groups_dict.get(key, None)
+            else:
+                self.groups_dict[key] = groups
+                return groups
+
+        def clear(self):
+            self.groups_dict.clear()
+
+            for task in self.tasks:
+                task()
+            self.tasks.clear()
+
+    def setupAxisConversion(self, axisForward, axisUp):
         # W for quaternions takes from blender W which is index 0
         self.vector4AxisMapper[3][0] = 0
         self.vector4AxisMapper[3][1] = 1.0
@@ -966,82 +1096,67 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                 self.vector3AxisMapper[1][1] = 1.0
                 self.vector4AxisMapper[1][1] = 1.0
 
-    @profile('createKeyframe', 1)
-    def createKeyframe(self, translationFCurve, rotationFCurve, scaleFCurve, frameNumber, restTransform):
-        keyframe = Keyframe()
+    class Group:
+        def __init__(self, max):
+            self.set = set()
+            self.map = None
+            self.max = max
 
-        translationVector = [0.0, 0.0, 0.0, 0.0]
-        rotationVector = [1.0, 0.0, 0.0, 0.0]
-        scaleVector = [1.0, 1.0, 1.0]
+        def isFull(self): return len(self.set) >= self.max
 
-        if translationFCurve is not None:
-            if translationFCurve[0] is not None:
-                translationVector[0] = translationFCurve[0].evaluate(frameNumber)
-            if translationFCurve[1] is not None:
-                translationVector[1] = translationFCurve[1].evaluate(frameNumber)
-            if translationFCurve[2] is not None:
-                translationVector[2] = translationFCurve[2].evaluate(frameNumber)
+        def hasVert(self, vert):
+            for g in vert.blendWeights:
+                if g[0] not in self.set:
+                    return False
+            return True
 
-        if rotationFCurve is not None:
-            if rotationFCurve[0] is not None:
-                rotationVector[0] = rotationFCurve[0].evaluate(frameNumber)
-            if rotationFCurve[1] is not None:
-                rotationVector[1] = rotationFCurve[1].evaluate(frameNumber)
-            if rotationFCurve[2] is not None:
-                rotationVector[2] = rotationFCurve[2].evaluate(frameNumber)
-            if rotationFCurve[3] is not None:
-                rotationVector[3] = rotationFCurve[3].evaluate(frameNumber)
+        def addVert(self, vert):
+            if len(self.set) >= self.max:
+                return self.hasVert(vert)
 
-        if scaleFCurve is not None:
-            if scaleFCurve[0] is not None:
-                scaleVector[0] = scaleFCurve[0].evaluate(frameNumber)
-            if scaleFCurve[1] is not None:
-                scaleVector[1] = scaleFCurve[1].evaluate(frameNumber)
-            if scaleFCurve[2] is not None:
-                scaleVector[2] = scaleFCurve[2].evaluate(frameNumber)
+            missing = 0
+            for g in vert.blendWeights:
+                if g[0] not in self.set:
+                    missing += 1
 
-        poseTransform = self.createTransformMatrix(translationVector, rotationVector, scaleVector)
-        translationVector, rotationVector, scaleVector = (restTransform @ poseTransform).decompose()
+            if len(self.set) + missing >= self.max:
+                return False
 
-        # If one of the transform attributes had to be evaluated above then this
-        # is a keyframe, otherwise it's on rest pose and we don't need the keyframe
-        keyframe.translation = list(translationVector)
-        keyframe.scale = list(scaleVector)
-        keyframe.rotation = list(rotationVector)
-        return keyframe
+            for g in vert.blendWeights:
+                self.set.add(g[0])
 
-    @profile('approximate', 1)
-    def approximateKeyframes(self, separateList, type, err):
-        if type == 1:
-            elementSize = 5
-        else:
-            elementSize = 4
+            return True
 
-        points = array([array(p.value + [p.keytime]) for p in separateList])
-        approx = Approximator(elementSize)
-        indices = approx.approximate(points, err)
-        out = [separateList[i] for i in indices]
+        def remap(self):
+            self.map = [-1] * (max(self.set, default=0) + 1)
+            for i, it in enumerate(self.set):
+                self.map[it] = i
 
-        if len(out) == 2:
-            out0 = out[0].value
-            out1 = out[1].value
-            for i in range(1, elementSize - 1):
-                if utils.limitFloatPrecision(out0[i]) != utils.limitFloatPrecision(out1[i]):
-                    return out
+    class WrappedVertex:
+        def __init__(self, pos):
+            self.pos = pos
+            self.blendWeights = None
+            self.blendWeightsAligned = None
 
-            if type == 0:
-                if utils.testDefaultTransform(out0):
-                    return []
-            elif type == 1:
-                if utils.testDefaultQuaternion(out0):
-                    return []
-            elif type == 2:
-                if utils.testDefaultScale(out0):
-                    return []
+        def setGroups(self, groups, max):
+            if groups is None:
+                self.blendWeights = None
+                return
 
-            out.pop()
-        return out
+            filtered = list(map(lambda x: [x.group, x.weight], filter(lambda x: not utils.is0(x.weight), groups)))
+            if len(filtered) > max:
+                filtered.sort(key=lambda x: x[1])
+                filtered = filtered[0:max]
 
+            blendSum = 0.0
+            for i in range(len(filtered)):
+                blendSum += filtered[i][1]
+
+            if not utils.is1(blendSum):
+                for i in range(len(filtered)):
+                    filtered[i][1] /= blendSum
+
+            self.blendWeights = filtered
 
 @profile('writeToFileDebugKeyframes', 0)
 def writeToFileDebugKeyframes(filepath, model):

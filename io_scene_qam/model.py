@@ -9,11 +9,12 @@ from .nbt import (
     NBTTagString,
     NBTTagFloat,
     NBTTagFloatArray,
-    NBTTagUShortArray
+    NBTTagUShortArray,
+    NBTTagIntArray
 )
 
 __all__ = (
-    'QamModel', 'VertexAttributes', 'VertexAttribute',
+    'QamModel', 'VertexAttributes', 'VertexAttribute', 'VertexAttributeObj',
     'Vertex', 'Mesh', 'MeshPart', 'Node', 'NodePart', 'BoundBox', 'Bone', 'Texture',
     'Material', 'Animation', 'NodeAnimation', 'Keyframe', 'KeyframeSeparate'
 )
@@ -50,31 +51,28 @@ class QamModel(NBTSerializable):
 
 # end QamModel
 
-class VertexAttributeType:
-    __slots__ = ('name')
+class VertexAttribute:
+    __slots__ = ('name', 'id')
 
-    def __init__(self):
-        self.name = None
+    def __init__(self, name, id, map):
+        self.name = name
+        self.id = id
+        map[id] = self
 
     def init(self, list, obj):
         list.append(self.name)
 
-class VertexAttributeVectorF(VertexAttributeType):
-    def __init__(self, name):
-        self.name = name
+    def of(self, value, hash=None):
+        return VertexAttributeObj(self.id, value, hash)
 
-class VertexAttributeBoneIndices(VertexAttributeType):
-    def __init__(self, name):
-        self.name = name
+class VertexAttributeBoneIndices(VertexAttribute):
 
     def init(self, list, obj):
         count = len(obj.value)
-        for i in range(count):
+        for i in range(0, count):
             list.append(self.name + str(i))
 
-class VertexAttributeBoneWeights(VertexAttributeType):
-    def __init__(self, name):
-        self.name = name
+class VertexAttributeBoneWeights(VertexAttribute):
 
     def init(self, list, obj):
         idx = 0
@@ -85,42 +83,25 @@ class VertexAttributeBoneWeights(VertexAttributeType):
             count -= 4
 
 class VertexAttributes(object):
-    POSITION = 10
-    NORMAL = 20
-    TANGENT = 30
-    BINORMAL = 40
-    COLOR = 50
-    TEXCOORD0 = 60
-    TEXCOORD1 = 61
-    TEXCOORD2 = 62
-    TEXCOORD3 = 63
-    TEXCOORD4 = 64
-    TEXCOORD5 = 65
-    TEXCOORD6 = 66
-    TEXCOORD7 = 67
-    TEXCOORD8 = 68
-    TEXCOORD9 = 69
-    BONEINDICES = 70
-    BONEWEIGHTS = 80
-
     ATTRIBUTE_MAP = {}
-    ATTRIBUTE_MAP[POSITION] = VertexAttributeVectorF('POSITION')
-    ATTRIBUTE_MAP[NORMAL] = VertexAttributeVectorF('NORMAL')
-    ATTRIBUTE_MAP[TANGENT] = VertexAttributeVectorF('TANGENT')
-    ATTRIBUTE_MAP[BINORMAL] = VertexAttributeVectorF('BINORMAL')
-    ATTRIBUTE_MAP[COLOR] = VertexAttributeVectorF('COLOR')
-    ATTRIBUTE_MAP[TEXCOORD0] = VertexAttributeVectorF('TEXCOORD0')
-    ATTRIBUTE_MAP[TEXCOORD1] = VertexAttributeVectorF('TEXCOORD1')
-    ATTRIBUTE_MAP[TEXCOORD2] = VertexAttributeVectorF('TEXCOORD2')
-    ATTRIBUTE_MAP[TEXCOORD3] = VertexAttributeVectorF('TEXCOORD3')
-    ATTRIBUTE_MAP[TEXCOORD4] = VertexAttributeVectorF('TEXCOORD4')
-    ATTRIBUTE_MAP[TEXCOORD5] = VertexAttributeVectorF('TEXCOORD5')
-    ATTRIBUTE_MAP[TEXCOORD6] = VertexAttributeVectorF('TEXCOORD6')
-    ATTRIBUTE_MAP[TEXCOORD7] = VertexAttributeVectorF('TEXCOORD7')
-    ATTRIBUTE_MAP[TEXCOORD8] = VertexAttributeVectorF('TEXCOORD8')
-    ATTRIBUTE_MAP[TEXCOORD9] = VertexAttributeVectorF('TEXCOORD9')
-    ATTRIBUTE_MAP[BONEINDICES] = VertexAttributeBoneIndices('BONEINDICES')
-    ATTRIBUTE_MAP[BONEWEIGHTS] = VertexAttributeBoneWeights('BONEWEIGHTS')
+
+    POSITION = VertexAttribute('POSITION', 10, ATTRIBUTE_MAP)
+    NORMAL = VertexAttribute('NORMAL', 20, ATTRIBUTE_MAP)
+    TANGENT = VertexAttribute('TANGENT', 30, ATTRIBUTE_MAP)
+    BINORMAL = VertexAttribute('BINORMAL', 40, ATTRIBUTE_MAP)
+    COLOR = VertexAttribute('COLOR', 50, ATTRIBUTE_MAP)
+    TEXCOORD0 = VertexAttribute('TEXCOORD0', 60, ATTRIBUTE_MAP)
+    TEXCOORD1 = VertexAttribute('TEXCOORD1', 61, ATTRIBUTE_MAP)
+    TEXCOORD2 = VertexAttribute('TEXCOORD2', 62, ATTRIBUTE_MAP)
+    TEXCOORD3 = VertexAttribute('TEXCOORD3', 63, ATTRIBUTE_MAP)
+    TEXCOORD4 = VertexAttribute('TEXCOORD4', 64, ATTRIBUTE_MAP)
+    TEXCOORD5 = VertexAttribute('TEXCOORD5', 65, ATTRIBUTE_MAP)
+    TEXCOORD6 = VertexAttribute('TEXCOORD6', 66, ATTRIBUTE_MAP)
+    TEXCOORD7 = VertexAttribute('TEXCOORD7', 67, ATTRIBUTE_MAP)
+    TEXCOORD8 = VertexAttribute('TEXCOORD8', 68, ATTRIBUTE_MAP)
+    TEXCOORD9 = VertexAttribute('TEXCOORD9', 69, ATTRIBUTE_MAP)
+    BONEINDICES = VertexAttributeBoneIndices('BONEINDICES', 70, ATTRIBUTE_MAP)
+    BONEWEIGHTS = VertexAttributeBoneWeights('BONEWEIGHTS', 80, ATTRIBUTE_MAP)
 
     @staticmethod
     def of(type):
@@ -131,44 +112,31 @@ class VertexAttributes(object):
         return VertexAttributes.ATTRIBUTE_MAP[type].name
 
     @staticmethod
-    def isTexCoord(type):
-        return VertexAttributes.TEXCOORD0 <= type and type <= VertexAttributes.TEXCOORD9
+    def isTexCoord(id):
+        return VertexAttributes.TEXCOORD0.id <= type and type <= VertexAttributes.TEXCOORD9.id
 
 # end VertexAttributes
 
-class VertexAttribute(NBTSerializable):
-    __slots__ = ('type', 'value', 'hashCache')
+class VertexAttributeObj:
+    __slots__ = ('type', 'value', 'hash')
 
-    def __init__(self, type, value):
+    def __init__(self, type, value, hash=None):
         self.type = type
         self.value = value
-        self.limitPrecision()
-        self.hashCache = None
+        if hash is None:
+            self.rehash()
+        else:
+            self.hash = hash
 
-    def markDirty(self):
-        self.hashCache = None
+    @profile('rehashVertexAttribute', 3)
+    def rehash(self):
+        self.hash = 81 * self.type + utils.hashList(self.value)
 
-    @profile('limitPrecision', 3)
-    def limitPrecision(self):
-        utils.limitFloatListPrecision(self.value)
-        self.markDirty()
-
-    @profile('hashVertexAttribute', 3)
     def __hash__(self):
-        if self.hashCache is None:
-            self.hashCache = self.type
-            self.hashCache = 81 * self.hashCache + utils.hashList(self.value)
-        return self.hashCache
+        return self.hash
 
-    @profile('eqVertexAttribute', 3)
     def __eq__(self, another):
         """Compare this attribute with another for value"""
-        if another is None or not isinstance(another, VertexAttribute):
-            return False
-
-        if self.type != another.type:
-            return False
-
         if len(self.value) != len(another.value):
             return False
 
@@ -182,74 +150,46 @@ class VertexAttribute(NBTSerializable):
         return not self.__eq__(another)
 
     def __repr__(self):
-        value = "{!s} {!r}".format(VertexAttributes.name(self.type), self.value)
+        value = "{!s} {!r}".format(VertexAttributes.of(self.type).name, self.value)
         return value
 
-# end VertexAttribute
+# end VertexAttributeObj
 
 class Vertex(NBTSerializable):
-    __slots__ = ('attributes', 'attrBoneIndices', 'attrBoneWeights', 'hashCache')
+    __slots__ = ('attributes', 'attrBoneIndices', 'attrBoneWeights', 'hash')
 
     def __init__(self):
         self.attributes = []
         self.attrBoneIndices = None
         self.attrBoneWeights = None
-        self.hashCache = None
-
-    def markDirty(self):
-        self.hashCache = None
+        self.hash = None
 
     def add(self, attribute):
         self.attributes.append(attribute)
 
-    def addBlendWeight(self, idx, weight, max_bones):
+    def addBlendWeight(self, idx, weight):
         if self.attrBoneIndices is None:
-            self.attrBoneIndices = VertexAttribute(VertexAttributes.BONEINDICES, [])
-            self.attrBoneWeights = VertexAttribute(VertexAttributes.BONEWEIGHTS, [weight])
-            self.attrBoneIndices.value.append(int(idx))
+            self.attrBoneIndices = VertexAttributes.BONEINDICES.of([])
+            self.attrBoneWeights = VertexAttributes.BONEWEIGHTS.of([])
             self.attributes.append(self.attrBoneIndices)
             self.attributes.append(self.attrBoneWeights)
-        else:
-            idx = utils.binaryInsert(self.attrBoneWeights.value, weight)
-            self.attrBoneIndices.value.insert(idx, int(idx))
-            if len(self.attrBoneWeights.value) > max_bones:
-                self.attrBoneWeights.value.pop()
-                self.attrBoneIndices.value.pop()
+        self.attrBoneWeights.value.append(weight)
+        self.attrBoneIndices.value.append(int(idx))
 
-    @profile('normalizeBlendWeight', 2)
-    def normalizeBlendWeight(self, mod):
-        if self.attributes is None or self.attrBoneIndices is None:
-            return
-
-        blendWeightSum = 0.0
-        for i in range(len(self.attrBoneWeights.value)):
-            blendWeightSum = blendWeightSum + self.attrBoneWeights.value[i]
-
-        for i in range(len(self.attrBoneWeights.value)):
-           self.attrBoneWeights.value[i] /= blendWeightSum
-
-        addit = len(self.attrBoneWeights.value)
-        addit = ((addit - 1) // mod * mod) + mod
-        addit -= len(self.attrBoneWeights.value)
-        while addit > 0:
-            self.attrBoneIndices.value.append(0)
-            self.attrBoneWeights.value.append(0.0)
-            addit -= 1
-
-        self.attrBoneWeights.limitPrecision()
-        self.markDirty()
+    @profile('rehashVertex', 3)
+    def rehash(self):
+        self.hash = utils.hashList(self.attributes)
 
     @profile('hashVertex', 3)
     def __hash__(self):
-        if self.hashCache is None:
-            self.hashCache = utils.hashList(self.attributes)
-        return self.hashCache
+        return self.hash
 
     @profile('eqVertex', 3)
     def __eq__(self, another):
-        if another is None or not isinstance(another, Vertex):
-            raise TypeError("'another' must be a Vertex")
-        return hash(self) == hash(another)
+        for pos in range(len(self.attributes)):
+            if self.attributes[pos] != another.attributes[pos]:
+                return False
+        return True
 
     def __ne__(self, another):
         return not self.__eq__(another)
@@ -281,14 +221,13 @@ class Mesh(NBTSerializable):
         self.attributes = []
         self.vertexIndices = {}
 
-    @profile('addVertex', 2)
+    @profile('addVertex', 3)
     def addVertex(self, vertex):
-        vertexHash = hash(vertex)
-        idx = self.vertexIndices.get(vertexHash, -1)
+        idx = self.vertexIndices.get(vertex, -1)
         if idx < 0:
             self.vertices.append(vertex)
             idx = len(self.vertices) - 1
-            self.vertexIndices[vertexHash] = idx
+            self.vertexIndices[vertex] = idx
         return idx
 
     def addPart(self, meshPart):
@@ -296,13 +235,13 @@ class Mesh(NBTSerializable):
         meshPart.parentMesh = self
 
     @profile('normalizeAttributes', 2)
-    def normalizeAttributes(self):
+    def normalizeAttributes(self, mod):
         if len(self.vertices) > 0:
            self.attributes = [it.type for it in self.vertices[0].attributes]
 
         attrColorInx = -1
         for i in range(len(self.attributes)):
-            if self.attributes[i] == VertexAttributes.COLOR:
+            if self.attributes[i] == VertexAttributes.COLOR.id:
                 attrColorInx = i
 
         bonesCount = 0
@@ -311,6 +250,8 @@ class Mesh(NBTSerializable):
                 bonesCount = len(it.attrBoneWeights.value)
 
         if bonesCount > 0:
+            bonesCount = ((bonesCount - 1) // mod * mod) + mod
+
             indicesCount = ((bonesCount - 1) >> 2 << 2) + 4
             indicesFmtPack = '>{}B'.format(indicesCount)
             indicesFmtUnpack = '>{}f'.format(indicesCount // 4)
@@ -322,13 +263,13 @@ class Mesh(NBTSerializable):
                 for i in range(indicesCount - len(vert.attrBoneIndices.value)):
                     vert.attrBoneIndices.value.append(0)
 
-                tmp = struct.pack(indicesFmtPack, *vert.attrBoneIndices.value)
+                tmp = struct.pack(indicesFmtPack, *vert.attrBoneIndices.value[::-1])
                 vert.attrBoneIndices.value = struct.unpack(indicesFmtUnpack, tmp)
 
         if attrColorInx >= 0:
             for vert in self.vertices:
                 attr = vert.attributes[attrColorInx]
-                tmp = struct.pack('>4B', *[int(it * 255) for it in attr.value])
+                tmp = struct.pack('>4B', *[int(it * 255) for it in attr.value[::-1]])
                 attr.value = struct.unpack('>f', tmp)
 
     def packNBT(self):
@@ -416,7 +357,7 @@ class Node(NBTSerializable):
     def packNBT(self):
         transform = []
         transform.extend(self.translation if self.translation != None else [0.0, 0.0, 0.0])
-        transform.extend(self.rotation if self.rotation != None else [1.0, 0.0, 0.0, 0.0])
+        transform.extend(self.rotation if self.rotation != None else [0.0, 0.0, 0.0, 1.0])
         transform.extend(self.scale if self.scale != None else [1.0, 1.0, 1.0])
 
         nbt = NBTTagCompound()
@@ -479,7 +420,7 @@ class Bone(NBTSerializable):
     def packNBT(self):
         transform = []
         transform.extend(self.translation if self.translation != None else [0.0, 0.0, 0.0])
-        transform.extend(self.rotation if self.rotation != None else [1.0, 0.0, 0.0, 0.0])
+        transform.extend(self.rotation if self.rotation != None else [0.0, 0.0, 0.0, 1.0])
         transform.extend(self.scale if self.scale != None else [1.0, 1.0, 1.0])
 
         nbt = NBTTagCompound()
@@ -618,7 +559,7 @@ class Keyframe(NBTSerializable):
     def packNBT(self):
         list = [self.keytime]
         list.extend(self.translation if self.translation is not None else [0.0, 0.0, 0.0])
-        list.extend(self.rotation if self.rotation is not None else [1.0, 0.0, 0.0, 0.0])
+        list.extend(self.rotation if self.rotation is not None else [0.0, 0.0, 0.0, 1.0])
         list.extend(self.scaling if self.scaling is not None else [1.0, 1.0, 1.0])
         return NBTTagFloatArray(list)
 

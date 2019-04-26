@@ -5,7 +5,7 @@ __all__ = (
 )
 
 prof = {}
-prof_level = 110
+prof_level = 1
 
 class profile:
     '''Function decorator for code profiling.'''
