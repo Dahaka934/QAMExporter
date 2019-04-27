@@ -657,7 +657,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
         # Save our time per currentFrameNumber (in miliseconds)
         fps = context.scene.render.fps
-        frameTime = (1 / fps) * 1000
+        frameTime = (1 / fps)
 
         # For each action we export currentFrameNumber data.
         # We are exporting all actions, but to avoid exporting deleted actions (actions with ZERO users)
