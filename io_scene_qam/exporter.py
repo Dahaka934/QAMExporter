@@ -317,6 +317,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             # Clone mesh to a temporary object. Wel'll apply modifiers and triangulate the clone before exporting.
             blNode = self.copyNode(context, blNode)
             blMesh = blNode.data
+            blMesh.transform(self.global_matrix)
             self.meshTriangulate(blMesh)
 
             # We can only export polygons that are associated with a material, so we loop
@@ -386,9 +387,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                                 tangent[0], tangent[1], tangent[2] = blLoop.tangent
                                 vertex.add(VertexAttributes.TANGENT.of(tangent, 0))
 
-                                binormal = [None, None, None]
-                                binormal[0], binormal[1], binormal[2] = blLoop.bitangent
-                                vertex.add(VertexAttributes.BINORMAL.of(binormal, 0))
+                                bitangent = [None, None, None]
+                                bitangent[0], bitangent[1], bitangent[2] = blLoop.bitangent
+                                vertex.add(VertexAttributes.BINORMAL.of(bitangent, 0))
                             ############
 
                             ############
@@ -753,7 +754,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
         for i, vert in enumerate(blMesh.vertices):
             pos = vert.co
-            vertices[i] = ExportQAM.WrappedVertex(self.convertTranslation(pos))
+            vertices[i] = ExportQAM.WrappedVertex([pos[0], pos[1], pos[2]])
             if bones:
                 vertices[i].setGroups(vert.groups, self.bones_per_vert_max)
 
