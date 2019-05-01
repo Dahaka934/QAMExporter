@@ -328,19 +328,21 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                 continue
 
             gen_tangents = False
-            if self.include_tangent_binormal and blMesh.uv_layers is not None and len(blMesh.uv_layers) > 0:
-                try:
+            gen_normals = False
+            try:
+                if self.include_tangent_binormal and blMesh.uv_layers is not None and len(blMesh.uv_layers) > 0:
                     blMesh.calc_tangents(uvmap=blMesh.uv_layers[0].name)
                     gen_tangents = True
-                except:
-                    pass
+                elif self.include_normals:
+                    blMesh.calc_normals_split()
+                    gen_normals = True
+            except:
+                pass
 
             colorMap = blMesh.vertex_colors.active
 
             wrVertices = self.wrapVertices(blMesh, self.include_bones)
 
-            need_normals = self.include_normals
-            need_tangents = gen_tangents
             need_colors = colorMap is not None
             need_uvs = self.include_uvs and blMesh.uv_layers is not None and len(blMesh.uv_layers) > 0
 
@@ -378,30 +380,17 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                             # Exporting tangent and binormals. We calculate those prior to normals because
                             # if we want tangent and binormals then we'll be also using split normals, which
                             # will be exported next section
-                            if need_tangents:
-                                normal = [None, None, None]
-                                normal[0], normal[1], normal[2] = blLoop.normal
-                                vertex.add(VertexAttributes.NORMAL.of(normal))
-
-                                tangent = [None, None, None]
-                                tangent[0], tangent[1], tangent[2] = blLoop.tangent
-                                vertex.add(VertexAttributes.TANGENT.of(tangent, 0))
-
-                                bitangent = [None, None, None]
-                                bitangent[0], bitangent[1], bitangent[2] = blLoop.bitangent
-                                vertex.add(VertexAttributes.BINORMAL.of(bitangent, 0))
+                            if gen_tangents:
+                                vertex.add(VertexAttributes.NORMAL.of(blLoop.normal[0:3]))
+                                vertex.add(VertexAttributes.TANGENT.of(blLoop.tangent[0:3], 0))
+                                vertex.add(VertexAttributes.BINORMAL.of(blLoop.bitangent[0:3], 0))
                             ############
 
                             ############
                             # Read normals. We also determine if we'll user per-face (flat shading)
                             # or per-vertex normals (gouraud shading) here.
-                            elif need_normals:
-                                normal = [None, None, None]
-                                if poly.use_smooth:
-                                    normal[0], normal[1], normal[2] = blVertex.normal
-                                else:
-                                    normal[0], normal[1], normal[2] = poly.normal
-                                vertex.add(VertexAttributes.NORMAL.of(normal))
+                            elif gen_normals:
+                                vertex.add(VertexAttributes.NORMAL.of(blLoop.normal[0:3]))
                             ############
 
                             ############
@@ -440,6 +429,8 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
             if gen_tangents:
                 blMesh.free_tangents()
+            elif gen_normals:
+                blMesh.free_normals_split()
 
             bpy.data.objects.remove(blNode)
             bpy.data.meshes.remove(blMesh)
@@ -754,7 +745,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
         for i, vert in enumerate(blMesh.vertices):
             pos = vert.co
-            vertices[i] = ExportQAM.WrappedVertex([pos[0], pos[1], pos[2]])
+            vertices[i] = ExportQAM.WrappedVertex(pos[0:3])
             if bones:
                 vertices[i].setGroups(vert.groups, self.bones_per_vert_max)
 
