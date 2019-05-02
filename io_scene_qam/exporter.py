@@ -184,6 +184,8 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             layout.prop(self, "include_uvs")
             layout.prop(self, "include_normals")
             layout.prop(self, "include_tangent_binormal")
+            layout.prop(self, "axis_forward")
+            layout.prop(self, "axis_up")
         elif self.ui_tab == 'ARMATURE':
             layout.prop(self, "include_bones")
             layout.prop(self, "include_armature")
@@ -204,8 +206,8 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             bpy.ops.ed.undo_push("INVOKE_DEFAULT")
             return self.exportModel(context)
         finally:
-            bpy.ops.ed.undo()
             self.cleanData()
+            bpy.ops.ed.undo()
         return {'FINISHED'}
 
     @profile_print()
@@ -314,10 +316,12 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             mesh = Mesh()
             mesh.id = blNode.name
 
-            # Clone mesh to a temporary object. Wel'll apply modifiers and triangulate the clone before exporting.
-            blNode = self.copyNode(context, blNode)
+            matrix = mathutils.Matrix(blNode.matrix_local)
+            blNode.matrix_local.identity()
             blMesh = blNode.data
-            blMesh.transform(self.global_matrix)
+            bpy.context.scene.update()
+            matrix = self.global_matrix @ matrix
+            blMesh.transform(matrix)
             self.meshTriangulate(blMesh)
 
             # We can only export polygons that are associated with a material, so we loop
@@ -432,9 +436,6 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             elif gen_normals:
                 blMesh.free_normals_split()
 
-            bpy.data.objects.remove(blNode)
-            bpy.data.meshes.remove(blMesh)
-
             mesh.normalizeAttributes(self.bones_per_vert_mod)
             meshes.append(mesh)
 
@@ -518,13 +519,16 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
 
         listOfBlenderObjects = None
         if parent is None:
-            listOfBlenderObjects = self.bpyObjects
+            listOfBlenderObjects = list(filter(lambda x: x.parent is None, context.scene.objects))
+            # listOfBlenderObjects = context.scene.objects
         elif isinstance(parent, bpy.types.Bone):
             listOfBlenderObjects = parent.children
         elif parent.type == 'MESH':
             listOfBlenderObjects = parent.children
         elif parent.type == 'ARMATURE':
-            listOfBlenderObjects = parent.data.bones
+            from itertools import chain
+            listOfBlenderObjects = chain(parent.children, parent.data.bones) if parent.children is not None else parent.data.bones
+            # listOfBlenderObjects = parent.data.bones
             # If parent is an armature, we store it's name to concatenate with bone names later
             parentName = parent.name
         else:
@@ -599,9 +603,6 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                         nodePart.meshPartId = blNode.name + "_" + str(meshPartIndex)
                         nodePart.materialId = blMaterial.name
                         meshPartIndex += 1
-
-                        if blNode.bound_box is not None:
-                            nodePart.bound_box = BoundBox(blNode.bound_box)
 
                         # Start writing bones
                         blArmature = blNode.find_armature()
@@ -746,6 +747,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         for i, vert in enumerate(blMesh.vertices):
             pos = vert.co
             vertices[i] = ExportQAM.WrappedVertex(pos[0:3])
+            # vertices[i] = ExportQAM.WrappedVertex(self.convertTranslation(pos))
             if bones:
                 vertices[i].setGroups(vert.groups, self.bones_per_vert_max)
 
@@ -932,6 +934,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         def __init__(self):
             self.groups_dict = {}
             self.tasks = []
+            self.dispose_nodes = []
 
         def groups(self, name, blMaterialIndex, groups):
             key = name + '__' + str(blMaterialIndex)
@@ -947,6 +950,11 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             for task in self.tasks:
                 task()
             self.tasks.clear()
+
+            self.dispose_nodes.clear()
+            for it in self.dispose_nodes:
+                bpy.data.objects.remove(it)
+                bpy.data.meshes.remove(it.data)
 
     def setupAxisConversion(self, axisForward, axisUp):
         # W for quaternions takes from blender W which is index 0

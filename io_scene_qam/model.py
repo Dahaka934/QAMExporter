@@ -15,7 +15,7 @@ from .nbt import (
 
 __all__ = (
     'QamModel', 'VertexAttributes', 'VertexAttribute', 'VertexAttributeObj',
-    'Vertex', 'Mesh', 'MeshPart', 'Node', 'NodePart', 'BoundBox', 'Bone', 'Texture',
+    'Vertex', 'Mesh', 'MeshPart', 'Node', 'NodePart', 'Bone', 'Texture',
     'Material', 'Animation', 'NodeAnimation', 'Keyframe', 'KeyframeSeparate'
 )
 
@@ -372,13 +372,12 @@ class Node(NBTSerializable):
 # end Node
 
 class NodePart(NBTSerializable):
-    __slots__ = ('meshPartId', 'materialId', 'bones', 'bound_box')
+    __slots__ = ('meshPartId', 'materialId', 'bones')
 
     def __init__(self):
         self.meshPartId = ""
         self.materialId = ""
         self.bones = None
-        self.bound_box = None
 
     def addBone(self, value):
         if self.bones is None:
@@ -391,22 +390,9 @@ class NodePart(NBTSerializable):
         nbt['materialId'] = NBTTagString(self.materialId)
         if self.bones is not None:
             nbt['bones'] = NBTTagList(NBTTagCompound, [it.packNBT() for it in self.bones])
-        if self.bound_box is not None:
-            nbt['boundBox'] = self.bound_box.packNBT()
         return nbt
 
 # end NodePart
-
-class BoundBox(NBTSerializable):
-    __slots__ = ('values')
-
-    def __init__(self, values):
-        self.values = values
-
-    def packNBT(self):
-        return NBTTagList(NBTTagFloatArray, [NBTTagFloatArray(it) for it in self.values])
-
-# end BoundBox
 
 class Bone(NBTSerializable):
     __slots__ = ('node', 'translation', 'rotation', 'scale')
