@@ -165,6 +165,12 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             soft_min=0, soft_max=1
             )
 
+    filter_partial_animations: BoolProperty(
+            name="Filter partial animations",
+            description="Remove animation if contains 'Up' and 'Down'",
+            default=True
+            )
+
     def __init__(self):
         self.model = None
         self.bpyObjects = None
@@ -199,6 +205,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             layout.prop(self, "approx_err_rotations")
             layout.prop(self, "approx_err_scales")
             layout.prop(self, "debug_animations")
+            layout.prop(self, "filter_partial_animations")
 
     def execute(self, context):
         try:
@@ -656,7 +663,10 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         # We are exporting all actions, but to avoid exporting deleted actions (actions with ZERO users)
         # each action must have at least one user. In Blender user the FAKE USER option to assign at least
         # one user to each action
-        blActions = list(filter(lambda x: x.users > 0, bpy.data.actions))
+        blActions = bpy.data.actions
+        if self.filter_partial_animations:
+            blActions = list(filter(lambda x: (x.name + "Up" not in blActions) and (x.name + "Down" not in blActions), list(blActions)))
+        blActions = list(filter(lambda x: x.users > 0, blActions))
         for idx, blAction in enumerate(blActions):
             utils.info("[{:>2}/{:>2}]: {:s}", idx, len(blActions), blAction.name)
 
@@ -1135,14 +1145,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
     class WrappedVertex:
         def __init__(self, pos):
             self.pos = pos
-            self.blendWeights = None
-            self.blendWeightsAligned = None
+            self.blendWeights = []
 
         def setGroups(self, groups, max):
-            if groups is None:
-                self.blendWeights = None
-                return
-
             filtered = list(map(lambda x: [x.group, x.weight], filter(lambda x: not utils.is0(x.weight), groups)))
             if len(filtered) > max:
                 filtered.sort(key=lambda x: x[1])
