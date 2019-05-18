@@ -221,6 +221,9 @@ class Mesh(NBTSerializable):
         self.attributes = []
         self.vertexIndices = {}
 
+    def isEmpty(self):
+        return len(self.attributes) == 0 or len(self.parts) == 0 or len(self.vertices) == 0
+
     @profile('addVertex', 3)
     def addVertex(self, vertex):
         idx = self.vertexIndices.get(vertex, -1)

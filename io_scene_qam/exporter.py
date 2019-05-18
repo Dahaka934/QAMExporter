@@ -444,7 +444,9 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
                 blMesh.free_normals_split()
 
             mesh.normalizeAttributes(self.bones_per_vert_mod)
-            meshes.append(mesh)
+
+            if not mesh.isEmpty():
+                meshes.append(mesh)
 
         return meshes
 
