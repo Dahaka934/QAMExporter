@@ -679,26 +679,26 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             animation.id = blAction.name
             animation.time = (frameRange - 1) * frameTime
 
-            bonesIndex = 0
             for blArmature in self.bpyObjects:
                 if blArmature.type != 'ARMATURE':
                     continue
 
+                curves = self.splitFCurves(blAction)
+
                 for blBone in blArmature.data.bones:
+                    boneCurves = curves.get(blBone.name, None)
+                    if boneCurves is None:
+                        continue
+
                     bone = NodeAnimation()
                     bone.boneId = ("%s_%s" % (blArmature.name, blBone.name))
-                    bonesIndex += 1
-
-                    translationFCurve = self.findFCurve(blAction, blBone, 'location')
-                    rotationFCurve = self.findFCurve(blAction, blBone, 'rotation_quaternion')
-                    scaleFCurve = self.findFCurve(blAction, blBone, 'scale')
 
                     # Rest transform of this bone, used as reference to calculate frames
                     restTransform = self.getTransformFromBone(blBone)
 
                     emptyAnimation = True
                     for frameNumber in range(frameStart, frameRange + 1):
-                        keyframe = self.createKeyframe(translationFCurve, rotationFCurve, scaleFCurve, frameNumber, restTransform)
+                        keyframe = self.createKeyframe(boneCurves, frameNumber, restTransform)
                         keyframe.keytime = (frameNumber - frameStart) * frameTime
 
                         emptyAnimation = False
@@ -820,6 +820,37 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         else:
             return bone.parent.matrix_local.inverted() @ bone.matrix_local
 
+    def splitFCurves(self, action):
+        out = {}
+
+        for fcurve in action.fcurves:
+            path = fcurve.data_path
+            if not path.startswith('pose.bones["'):
+                continue
+
+            bone = path[12:path.index('"', 13)]
+            prop = path[path.rindex('.') + 1:]
+
+            node = out.get(bone, None)
+            if node is None:
+                node = {}
+                out[bone] = node
+
+            array = node.get(prop, None)
+            if array is None:
+                if prop == 'location':
+                    array = [None, None, None]
+                elif prop == 'rotation_quaternion':
+                    array = [None, None, None, None]
+                elif prop == 'scale':
+                    array = [None, None, None]
+                else:
+                    continue
+                node[prop] = array
+            array[fcurve.array_index] = fcurve
+
+        return out
+
     @profile('findFCurve', 1)
     def findFCurve(self, action, bone, prop):
         """
@@ -841,6 +872,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             self.error("FCurve Property not supported")
             raise Exception("FCurve Property not supported")
 
+        empty = True
         for fcurve in action.fcurves:
             if fcurve.data_path == dataPath:
                 returnedFCurves[fcurve.array_index] = fcurve
@@ -867,13 +899,14 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         return matrix
 
     @profile('createKeyframe', 2)
-    def createKeyframe(self, translationFCurve, rotationFCurve, scaleFCurve, frameNumber, restTransform):
+    def createKeyframe(self, curves, frameNumber, restTransform):
         keyframe = Keyframe()
 
         translationVector = [0.0, 0.0, 0.0, 0.0]
         rotationVector = [1.0, 0.0, 0.0, 0.0]
         scaleVector = [1.0, 1.0, 1.0]
 
+        translationFCurve = curves.get('location', None)
         if translationFCurve is not None:
             if translationFCurve[0] is not None:
                 translationVector[0] = translationFCurve[0].evaluate(frameNumber)
@@ -882,6 +915,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             if translationFCurve[2] is not None:
                 translationVector[2] = translationFCurve[2].evaluate(frameNumber)
 
+        rotationFCurve = curves.get('rotation_quaternion', None)
         if rotationFCurve is not None:
             if rotationFCurve[0] is not None:
                 rotationVector[0] = rotationFCurve[0].evaluate(frameNumber)
@@ -892,6 +926,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             if rotationFCurve[3] is not None:
                 rotationVector[3] = rotationFCurve[3].evaluate(frameNumber)
 
+        scaleFCurve = curves.get('scale', None)
         if scaleFCurve is not None:
             if scaleFCurve[0] is not None:
                 scaleVector[0] = scaleFCurve[0].evaluate(frameNumber)
