@@ -147,21 +147,21 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
     approx_err_translations: FloatProperty(
             name="Approx translations",
             description="Approximate translations error",
-            default=0.0001,
+            default=0.00005,
             soft_min=0, soft_max=1
             )
 
     approx_err_rotations: FloatProperty(
             name="Approx rotations",
             description="Approximate rotations error",
-            default=0.0001,
+            default=0.00005,
             soft_min=0, soft_max=1
             )
 
     approx_err_scales: FloatProperty(
             name="Approx scales",
             description="Approximate scales error",
-            default=0.0001,
+            default=0.00005,
             soft_min=0, soft_max=1
             )
 
