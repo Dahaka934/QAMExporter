@@ -316,6 +316,8 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
         """Reads all MESH type objects and exported the selected ones (or all if 'only selected' isn't checked"""
         meshes = []
 
+        bpy.ops.object.mode_set(mode = 'OBJECT')
+
         blNodes = list(filter(lambda x: x.type == 'MESH', self.bpyObjects))
         for idx, blNode in enumerate(blNodes):
             utils.info("[{:>2}/{:>2}]: {:s}", idx, len(blNodes), blNode.name)
