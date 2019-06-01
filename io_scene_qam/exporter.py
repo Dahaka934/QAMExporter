@@ -326,7 +326,7 @@ class ExportQAM(bpy.types.Operator, ExportHelper):
             matrix = mathutils.Matrix(blNode.matrix_local)
             blNode.matrix_local.identity()
             blMesh = blNode.data
-            bpy.context.scene.update()
+            bpy.context.view_layer.update()
             matrix = self.global_matrix @ matrix
             blMesh.transform(matrix)
             self.meshTriangulate(blMesh)
